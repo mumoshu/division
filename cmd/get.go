@@ -15,10 +15,10 @@
 package cmd
 
 import (
-	"github.com/mumoshu/crdb/dynamodb"
+	"fmt"
+	"github.com/mumoshu/division/dynamodb"
 	"github.com/spf13/cobra"
 	"os"
-	"fmt"
 	"strings"
 )
 

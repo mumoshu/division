@@ -71,7 +71,7 @@ func (r *StreamSubscriber) GetStreamDataAsync() (<-chan *dynamodbstreams.Record,
 	}
 	numShards := len(shards)
 	if numShards > shardProcessingLimit {
-		panic(fmt.Errorf("too many shards: crdb supports up to %d, but there were %d shards", shardProcessingLimit, numShards))
+		panic(fmt.Errorf("too many shards: div supports up to %d, but there were %d shards", shardProcessingLimit, numShards))
 	}
 	fmt.Fprintf(os.Stderr, "reading %d shards\n", numShards)
 	for _, shard := range shards {

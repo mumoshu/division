@@ -5,4 +5,4 @@ format:
 
 .PHONY: build
 build:
-	go build .
+	go build -o div .

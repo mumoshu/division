@@ -2,11 +2,11 @@ package dynamodb
 
 import (
 	"fmt"
-	"github.com/mumoshu/crdb/api"
-	"github.com/mumoshu/crdb/framework"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/framework"
 )
 
-const databasePrefix = "crdb-"
+const databasePrefix = "div-"
 
 const (
 	crdName = "customresourcedefinition"

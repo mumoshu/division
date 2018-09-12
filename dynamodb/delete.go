@@ -3,7 +3,7 @@ package dynamodb
 import (
 	"fmt"
 	"github.com/guregu/dynamo"
-	"github.com/mumoshu/crdb/api"
+	"github.com/mumoshu/division/api"
 )
 
 func (p *dynamoResourceDB) Delete(resource string, name string) error {

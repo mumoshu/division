@@ -15,13 +15,15 @@
 package cmd
 
 import (
-	"github.com/mumoshu/crdb/dynamodb"
-	"github.com/spf13/cobra"
-	"github.com/Azure/brigade/pkg/script"
-	"os"
 	"fmt"
-	"github.com/mumoshu/crdb/api"
+	"github.com/Azure/brigade/pkg/script"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/dynamodb"
+	"github.com/spf13/cobra"
 	"io"
+	"k8s.io/client-go/kubernetes"
+	"os"
+	"strings"
 )
 
 type GatewayOptions struct {
@@ -34,7 +36,7 @@ var gatewayOpts GatewayOptions
 func NewCmdGateway() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gateway",
-		Short: "brigade gateway that exec command according to crdb resource changes like new deployment",
+		Short: "brigade gateway that exec command according to div resource changes like new deployment",
 		Args:  cobra.RangeArgs(0, 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -57,53 +59,93 @@ func NewCmdGateway() *cobra.Command {
 			}
 
 			clusterName := gatewayOpts.Cluster
-			projectName := gatewayOpts.Project
+			targetedProjectName := gatewayOpts.Project
 
-			allProjects, err := db.GetSync("project", projectName, []string{})
+			knownProjects, err := db.GetSync("project", targetedProjectName, []string{})
 			if err != nil {
 				return err
 			}
+			targetedProjects := map[string]*api.Resource{}
+			for _, proj := range knownProjects {
+				projName := proj.NameHashKey
+				if targetedProjectName != "" && projName != targetedProjectName {
+					continue
+				}
+				targetedProjects[projName] = proj
+			}
 
-			if projectName != "" {
+			targetedProjectNames := make([]string, len(targetedProjects))
+			i := 0
+			for _, p := range targetedProjects {
+				targetedProjectNames[i] = fmt.Sprintf("  * %s", p.NameHashKey)
+				i++
+			}
+			fmt.Fprintf(os.Stderr, `%d projects found:
+
+%s
+
+`, len(targetedProjectNames), strings.Join(targetedProjectNames, "\n"))
+
+			if targetedProjectName != "" {
 				noProject := true
-				for _, p := range allProjects {
-					noProject = noProject && p.NameHashKey != projectName
+				for _, p := range knownProjects {
+					noProject = noProject && p.NameHashKey != targetedProjectName
 				}
 				if noProject {
-					return fmt.Errorf("no project named \"%s\" found", projectName)
+					return fmt.Errorf("no project named \"%s\" found", targetedProjectName)
 				}
 			}
 
-			allApps, err := db.GetSync("application", "", []string{})
+			knownApps, err := db.GetSync("application", "", []string{})
 			if err != nil {
 				return err
 			}
-			apps := map[string]*api.Resource{}
-			for _, app := range allApps {
+			targetedApps := map[string]*api.Resource{}
+			for _, app := range knownApps {
 				appName := app.NameHashKey
 				if deployOpts.App != "" && appName != deployOpts.App {
 					continue
 				}
 				appProject := app.Spec["project"].(string)
-				if projectName != "" && appProject != projectName {
+				if _, ok := targetedProjects[appProject]; !ok {
 					continue
 				}
-				apps[appName] = app
+				targetedApps[appName] = app
 			}
 
+			g := &gateway{
+				targetedProjects,
+				targetedApps,
+				clusterName,
+				env,
+				c,
+				logs,
+				db,
+			}
+
+			newInstalls := make(chan *api.Resource, 1)
 			deploys, deployErrs := db.GetAsync("deployment", "", []string{}, true)
 			releases, releaseErrs := db.GetAsync("release", "", []string{}, true)
-			installs, installErrs := db.GetAsync("installs", "", []string{}, true)
+			installs, installErrs := db.GetAsync("install", "", []string{}, true)
 			for {
 				select {
 				case d := <-deploys:
-					if projectName == "" || projectName != "" && d.Spec["project"] == projectName {
+					deployProj := d.Spec["project"].(string)
+					deployApp := d.Spec["app"].(string)
+					_, hasTargetedProj := targetedProjects[deployProj]
+					_, hasTargetedApp := targetedApps[deployApp]
+					if hasTargetedProj && hasTargetedApp {
 						releaseName := fmt.Sprintf("%s-%s", d.NameHashKey, clusterName)
 						sha1 := d.Spec["sha1"]
 
 						rs, e := db.GetSync("release", releaseName, []string{})
 						if e != nil {
-							panic(e)
+							switch e.(type) {
+							case *dynamodb.ErrResourceNotFound:
+
+							default:
+								panic(e)
+							}
 						}
 						if len(rs) == 0 || rs[0].Spec["sha1"] != sha1 {
 							newRelease := &api.Resource{
@@ -111,9 +153,10 @@ func NewCmdGateway() *cobra.Command {
 								Metadata: api.Metadata{
 									Name: releaseName,
 								},
+								Kind: "Release",
 								Spec: map[string]interface{}{
-									"project": d.Spec["project"],
-									"app":     d.Spec["app"],
+									"project": deployProj,
+									"app":     deployApp,
 									"sha1":    sha1,
 									"cluster": clusterName,
 								},
@@ -125,94 +168,63 @@ func NewCmdGateway() *cobra.Command {
 						}
 					}
 				case r := <-releases:
-					if (projectName == "" || projectName != "" && r.Spec["project"] == projectName) && r.Spec["cluster"] == clusterName {
+					relProj := r.Spec["project"].(string)
+					relApp := r.Spec["app"].(string)
+					relCluster := r.Spec["cluster"].(string)
+					_, hasTargetedProj := targetedProjects[relProj]
+					_, hasTargetedApp := targetedApps[relApp]
+					hasTargetedCluster := relCluster == clusterName
+					if hasTargetedProj && hasTargetedApp && hasTargetedCluster {
 						sha1 := r.Spec["sha1"]
 						installName := fmt.Sprintf("%s-%s", r.NameHashKey, sha1)
 
 						is, e := db.GetSync("install", installName, []string{})
 						if e != nil {
-							panic(e)
+							switch e.(type) {
+							case *dynamodb.ErrResourceNotFound:
+
+							default:
+								panic(e)
+							}
 						}
 						if len(is) == 0 {
-							newRelease := &api.Resource{
+							newInstall := &api.Resource{
 								NameHashKey: installName,
 								Metadata: api.Metadata{
 									Name: installName,
 								},
+								Kind: "Install",
 								Spec: map[string]interface{}{
-									"project": r.Spec["project"],
-									"app":     r.Spec["app"],
+									"project": relProj,
+									"app":     relApp,
 									"sha1":    sha1,
 									"cluster": clusterName,
 									"phase":   "pending",
 								},
 							}
-							err := db.Apply(newRelease)
+							err := db.Apply(newInstall)
 							if err != nil {
 								panic(err)
 							}
+							// newInstall is propagated to
+							newInstalls <- newInstall
+						} else {
+							ins := is[0]
+							fmt.Fprintf(os.Stderr, "install \"%s\" is already %s\n. no need to trigger another install. skipping...", ins.NameHashKey, ins.Spec["phase"])
 						}
 					}
-				case i := <-installs:
-					if (projectName == "" || projectName != "" && i.Spec["project"] == projectName) && i.Spec["cluster"] == clusterName {
-						phase := i.Spec["phase"]
-						switch phase {
-						case "pending":
-							app := i.Spec["app"].(string)
-							set := i.Spec["set"].(string)
-							sha1 := i.Spec["sha1"].(string)
-							// dedup deployment to deployment_status by `app` and `cluster`
-							//statusKey := fmt.Sprintf("%s-%s-%s", env, cluster, app)
-
-							label := "-l=name=" + app
-							envFlag := "--environment=" + env
-							setFlag := "--set=ref=" + sha1
-							if set != "" {
-								setFlag += "," + set
-							}
-							payload := []byte(fmt.Sprintf(`
-{"command": ["echo", "helmfile", "--log-level=debug", "-f=helmfile.yaml", ""%s", "%s", "%s", "apply", "--auto-approve"]}
-`, envFlag, label, setFlag))
-							s := []byte(`
-const { events, Job } = require("brigadier")
-
-events.on("exec", (e, p) => {
-  console.log({"event": e, "payload": p})
-
-  var job = new Job("helmfile-apply", "alpine:3.4")
-  job.tasks = [
-    "echo Hello",
-    "echo World",
-    p.command.join(",")
-  ]
-
-  job.run()
-})
-`)
-							persistentLogsWriter, err := logs.Writer("install", i.NameHashKey)
-							if err != nil {
-								panic(err)
-							}
-
-							mul := io.MultiWriter(persistentLogsWriter, os.Stderr)
-
-							r, err := script.NewDelegatedRunner(c, mul, "", false, false, false)
-							if err != nil {
-								panic(err)
-							}
-
-							err = r.SendScript("mumoshu/uuid-generator", s, "apply", "", sha1, payload, "")
-							if err != nil {
-								panic(err)
-							}
-						case "failed":
-							// TODO retry
-							panic(fmt.Errorf("failed install: %s", i.NameHashKey))
-						case "running":
-						default:
-							panic(fmt.Errorf("unexpected phase for \"%s\": %s", i.NameHashKey, phase))
-						}
-				}
+				case i, ok := <-installs:
+					if !ok {
+						installs = nil
+						panic("TODO: install stream stopped unexpectedly. implement automatic retry")
+					}
+					g.handleInstall(i)
+				case i, ok := <-newInstalls:
+					if !ok {
+						installs = nil
+						panic("TODO: install stream stopped unexpectedly. implement automatic retry")
+					}
+					g.handleInstall(i)
 				case e := <-installErrs:
 					panic(e)
 				case e := <-deployErrs:
@@ -249,4 +261,112 @@ events.on("exec", (e, p) => {
 
 	return cmd
 
+}
+
+type gateway struct {
+	targetedProjects map[string]*api.Resource
+	targetedApps     map[string]*api.Resource
+	clusterName      string
+	env              string
+	c                *kubernetes.Clientset
+	logs             *dynamodb.LogStore
+	db               dynamodb.Store
+}
+
+func (g *gateway) handleInstall(i *api.Resource) error {
+	targetedProjects := g.targetedProjects
+	targetedApps := g.targetedApps
+	clusterName := g.clusterName
+	env := g.env
+	c := g.c
+	logs := g.logs
+	db := g.db
+
+	fmt.Fprintf(os.Stderr, "detected install: %v\n", i.Spec)
+	insProj := i.Spec["project"].(string)
+	insApp := i.Spec["app"].(string)
+	insCluster := i.Spec["cluster"].(string)
+	_, hasTargetedProj := targetedProjects[insProj]
+	_, hasTargetedApp := targetedApps[insApp]
+	hasTargetedCluster := insCluster == clusterName
+	if hasTargetedProj && hasTargetedApp && hasTargetedCluster {
+		insPhase := i.Spec["phase"]
+		switch insPhase {
+		case "pending":
+			//set, _ := i.Spec["set"].(string)
+			set := ""
+			sha1 := i.Spec["sha1"].(string)
+			// dedup deployment to deployment_status by `app` and `cluster`
+			//statusKey := fmt.Sprintf("%s-%s-%s", env, cluster, app)
+
+			label := "-l=name=" + insApp
+			envFlag := "--environment=" + env
+			setFlag := "--set=ref=" + sha1
+			if set != "" {
+				setFlag += "," + set
+			}
+			payload := []byte(fmt.Sprintf(`
+{"command": ["echo", "helmfile", "--log-level=debug", "-f=helmfile.yaml", ""%s", "%s", "%s", "apply", "--auto-approve"]}
+`, envFlag, label, setFlag))
+			s := []byte(`
+const { events, Job } = require("brigadier")
+
+events.on("exec", (e, p) => {
+  console.log({"event": e, "payload": p})
+
+  var job = new Job("helmfile-apply", "alpine:3.4")
+  job.tasks = [
+    "echo Hello",
+    "echo World",
+    p.command.join(",")
+  ]
+
+  job.run()
+})
+`)
+			persistentLogsWriter, err := logs.Writer("install", i.NameHashKey)
+			if err != nil {
+				panic(err)
+			}
+
+			mul := io.MultiWriter(persistentLogsWriter, os.Stderr)
+
+			r, err := script.NewDelegatedRunner(c, "default")
+			if err != nil {
+				panic(err)
+			}
+			r.ScriptLogDestination = mul
+			r.RunnerLogDestination = mul
+
+			i.Spec["phase"] = "running"
+			if err := db.Apply(i); err != nil {
+				panic(err)
+			}
+
+			var postPhase string
+			err = r.SendScript("mumoshu/uuid-generator", s, "exec", "", sha1, payload, "")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "brigade failed: %v\n", err)
+				postPhase = "failed"
+			} else {
+				postPhase = "completed"
+			}
+
+			i.Spec["phase"] = postPhase
+			if err := db.Apply(i); err != nil {
+				panic(err)
+			}
+		case "failed":
+			// TODO retry
+			fmt.Fprintf(os.Stderr, "TODO: retrying failed install: %s\n", i.NameHashKey)
+		case "running":
+			// TODO Mark it failed on timeout
+			fmt.Fprintf(os.Stderr, "TODO: install \"%s\" is already running. Remove it and redeploy in order to rerun\n", i.NameHashKey)
+		case "completed":
+			fmt.Fprintf(os.Stderr, "install \"%s\" is already completed. skipping\n", i.NameHashKey)
+		default:
+			panic(fmt.Errorf("unexpected phase for \"%s\": %s", i.NameHashKey, insPhase))
+		}
+	}
+	return nil
 }

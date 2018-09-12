@@ -13,10 +13,10 @@
 [[constraint]]
   name = "github.com/Azure/brigade"
   source = "github.com/mumoshu/brigade"
-  branch = "brig-run-as-lib"
+  branch = "script-runner-alt-log-dest"
 
 # Avoid:
-# # github.com/mumoshu/crdb/vendor/k8s.io/client-go/plugin/pkg/client/auth/azure
+# # github.com/mumoshu/division/vendor/k8s.io/client-go/plugin/pkg/client/auth/azure
 # vendor/k8s.io/client-go/plugin/pkg/client/auth/azure/azure.go:300:8: cannot use spt.Token (type func() adal.Token) as type adal.Token in field value
 [[override]]
   name = "github.com/Azure/go-autorest"

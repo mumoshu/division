@@ -26,15 +26,15 @@ func kubeClient() (*kubernetes.Clientset, error) {
 
 // getKubeConfig returns a Kubernetes client config.
 func getKubeConfig() (*rest.Config, error) {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	rules.DefaultClientConfig = &clientcmd.DefaultClientConfig
-	rules.ExplicitPath = globalKubeConfig
-
-	overrides := &clientcmd.ConfigOverrides{
-		ClusterDefaults: clientcmd.ClusterDefaults,
-		CurrentContext:  globalKubeContext,
-	}
-
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
+	//rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	//rules.DefaultClientConfig = &clientcmd.DefaultClientConfig
+	//rules.ExplicitPath = globalKubeConfig
+	//
+	//overrides := &clientcmd.ConfigOverrides{
+	//	ClusterDefaults: clientcmd.ClusterDefaults,
+	//	CurrentContext:  globalKubeContext,
+	//}
+	//
+	//return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
+	return clientcmd.BuildConfigFromFlags("", "/Users/kuoka-yusuke/.kube/config")
 }
-

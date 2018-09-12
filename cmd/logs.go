@@ -15,7 +15,7 @@
 package cmd
 
 import (
-	"github.com/mumoshu/crdb/dynamodb"
+	"github.com/mumoshu/division/dynamodb"
 	"github.com/spf13/cobra"
 	"time"
 )
@@ -56,7 +56,7 @@ func NewCmdLogs() *cobra.Command {
 			}
 
 			return logs.ReadPrint(args[0], args[1], logsReadOpts.Since, logsReadOpts.Follow)
-	},
+		},
 	}
 	rflags := readCmd.Flags()
 	rflags.DurationVar(&logsReadOpts.Since, "since", 0, "Only return logs newer than a relative duration like 5s, 2m, or 3h. Defaults to all logs.")

@@ -20,7 +20,7 @@
 
 package main
 
-import "github.com/mumoshu/crdb/cmd"
+import "github.com/mumoshu/division/cmd"
 
 func main() {
 	cmd.Execute()

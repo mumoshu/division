@@ -15,7 +15,7 @@
 package cmd
 
 import (
-	"github.com/mumoshu/crdb/dynamodb"
+	"github.com/mumoshu/division/dynamodb"
 	"github.com/spf13/cobra"
 )
 

@@ -1,26 +1,95 @@
-crdb
+Division
 =======
 
-A Custom Resources DataBase that provides an equivalent to Kubernetes custom resources, without Kubernetes.
+A single-binary control-plane for your Kubernetes clusters
 
-As of today, it supports `DynamoDB` as a backing datastore.
-That is, you can use `crdb` as a kubectl-like interface to manage your custom resources persisted in DynamoDB tables.
+## Introduction
+
+`Division` is a kind of control-plane for an event-based scripting platform for Kubernetes [Brigade](https://github.com/Azure/brigade).
+
+It is capable of distributing, scheduling, and logging any Kubernetes pods, runnable as Brigade scripts, across multiple Kubernetes clusters.
+
+Use it from your local machine or continuous integration system for
+GitOps, continous delivery, blue-green Kubernetes cluster switch, disaster recovery, and so on.
+
+## Model use-case: DIY GitOps Pipeline
+
+For demonstration purpose, here's how you'd implement a GitOps pipeline for your monorepo with `Division`.
+
+Firstly, install division's brigade gateway into your Kubernetes cluster:
+
+```
+$ helmfile -f brigade-div-gateway.yaml \
+  --set cluster=mycluster1 apply
+```
+
+Or run the gateway locally:
+
+```
+$ div gateway --cluster mycluster1
+```
+
+Then, update your CircleCI pipeline to run:
+
+```
+$ div deploy \
+  --project mumoshu/microservices \
+  --app mumoshu/microservices/myapp1 \
+  --ref $COMMIT_ID 
+  --cluster mycluster1
+```
+
+As soon as `div deloy` is run, the actual deployment using [helmfile](https://github.com/roboll/helmfile) is executed,
+and its logs are streamed from the gateway into `div deploy`.
+What's important is that this happens without direct access to Kubernets API.
+
+Repeat the `div gateway` for each cluster and omit `--cluster` flags from `div deploy`
+to make it multi-cluster aware.
+
+## Design
+
+`Division` has three components - `store`, `div`, and `gateway`.
+
+### store
+
+`store` is the core of `Division`. It is a a general-purpose, schemaless database
+that is very similar to Kubernetes's custom resources.
+This means, you can build something like [Kubernetes Operators](https://coreos.com/operators/) without Kubernetes.
+
+`store` is currently implemented by `DynamoDB`, so that `division` acts as a proxy to create/read/update/delete.
+DynamoDB tables and items. Although it is the only supported backend as of today, alternative implementation can be
+easily plugged-in by writing small amount of golang code.
+
+One of interesting featuers of `store` is that it provides a log stream per resource.
+So let's say you have a `deployment` resource, you can write and read log messages associated to the `deployment` resource.
+Use it for `installation` + `installation logs`, `deployment` + `deployment logs`, `job` + `job logs`, and so on.
+
+### div
+
+`div` is the command-line interface to `Division`.
+It can be used as a kubectl-like interface to manage your custom resources persisted in the datastore.
+
+### gateway
+
+`gateway` a.k.a `div gateway` is the sub-command of `div`, that acts as a [brigade gateway](https://github.com/Azure/brigade/blob/master/docs/topics/gateways.md).
+It receives any newly created and/or updated resources in `store`, translating to brigade events,
+that ends up triggering brigade scripts that orchestrates Kubernetes pods to achieve useful tasks.
 
 ## Use cases
 
 ### Centralize shared configuration of your CI pipelines
 
-`crdb` is intended to compliment both Pipeline-based CI systems and your workflows, so that you can use
-`crdb` as a source-of-truth across all your automations.
+`div` is intended to compliment both Pipeline-based CI systems and your workflows, so that you can use
+`div` as a source-of-truth across all your automations.
 
 ### Kubernetes Cluster Discovery
 
-For example, you may use `crdb` to discover your clusters from the CI/CD pipeline, without maintaining
+For example, you may use `div` to discover your clusters from the CI/CD pipeline, without maintaining
 a list of known clusters within your application repositories.
 
 ### Implementing Event Hub With Minimum Moving Parts
 
-In near future, `crdb wait` allows you to build an event hub for your system.
+In near future, `div wait` allows you to build an event hub for your system.
 
 For example, a `wait until human approval` workflow that is useful in your CI/CD pipeline can be implemented simply like:
 
@@ -29,7 +98,7 @@ The requester would run `myjob1`:
 ```console
 echo waiting for approval of job: myjob1
 
-crdb wait approval myjob1approval --until jsonql="status.phase = 'Approved'"
+div wait approval myjob1approval --until jsonql="status.phase = 'Approved'"
 
 echo myjob1 has been approved. continuing the process...
 ```
@@ -37,22 +106,22 @@ echo myjob1 has been approved. continuing the process...
 Whereas the approver approves the job:
 
 ```console
-$ crdb get myjob1approval -o json > myjob1approval.unapproved.json
+$ div get myjob1approval -o json > myjob1approval.unapproved.json
 $ ./json-set "status.phase=Approved" myjob1approval.unapproved.json > myjob1approval.approved.json 
-$ crdb apply -f myjob1approval.approved.json 
+$ div apply -f myjob1approval.approved.json 
 ``` 
 
 ## Installation
 
 ```
-$ go get github.com/mumoshu/crdb
+$ go get github.com/mumoshu/div
 ```
 
 ## Getting started
 
-1. Provide a proper AWS credentials to `crdb` via envvars(`AWS_PROFILE` is supported, too) or an instance profile.
+1. Provide a proper AWS credentials to `div` via envvars(`AWS_PROFILE` is supported, too) or an instance profile.
 
-2. Create `crdb.yaml`:
+2. Create `div.yaml`:
 
 ```yaml
 metadata:
@@ -66,16 +135,16 @@ spec:
         kind: Cluster
 ```
 
-Now, you are ready to CRUD your resources by running `crdb`.
+Now, you are ready to CRUD your resources by running `div`.
 
 ```
-$ crdb get cluster
-Error: no cluster found: dynamodb table named "crdb-static-default-cluster" does not exist
+$ div get cluster
+Error: no cluster found: dynamodb table named "div-static-default-cluster" does not exist
 
-$ crdb apply -f example/foo.cluster.yaml
+$ div apply -f example/foo.cluster.yaml
 cluster "foo" created
 
-$ ./crdb get cluster
+$ ./div get cluster
 {
   "items": [
     {
@@ -94,7 +163,7 @@ $ ./crdb get cluster
   "kind": "list"
 }
 
-$ crdb apply -f example/foo.cluster.2.yaml
+$ div apply -f example/foo.cluster.2.yaml
 cluster "foo" updated
 
 {
@@ -115,14 +184,14 @@ cluster "foo" updated
   "kind": "list"
 }
 
-$ crdb delete cluster foo
+$ div delete cluster foo
 cluster "foo" deleted
 
-$ crdb delete cluster foo
+$ div delete cluster foo
 Error: cluster "foo" not found
 
-$ crdb get cluster foo
-Error: cluster "foo" not found: dynamodb table named "crdb-test1-default-cluster" exists, but no item named "foo" found
+$ div get cluster foo
+Error: cluster "foo" not found: dynamodb table named "div-test1-default-cluster" exists, but no item named "foo" found
 ```
 
 ## Usage
@@ -134,16 +203,16 @@ Displays one or more resources
 
 Examples:
   # list all myresources
-  crdb get myresources 
+  div get myresources 
 
   # list a single myresource with specified name 
-  crdb get myresource foo
+  div get myresource foo
 
   # list a myresource identified by name in JSON output format
-  crdb get myresource foo -o json
+  div get myresource foo -o json
 
   # list myresources whose labels match the specified selector
-  crdb get myresources -l foo=bar 
+  div get myresources -l foo=bar 
 ```
 
 ### Apply
@@ -153,7 +222,7 @@ Apply a configuration to a resource by filename. The resource name must be speci
 This resource will be created if it doesn't exist yet.
 
 Examples:
-  crdb apply [-f|--file] <FilePath>
+  div apply [-f|--file] <FilePath>
 ```
 
 ### Delete
@@ -163,16 +232,16 @@ Delete resources by resources and names.
 
 Examples:
   # Delete a myresource with specified name
-  crdb delete myresource foo
+  div delete myresource foo
 ```
 
 ## Configuration
 
-Provide `crdb` your resource definitions via either `static` or `dynamic`(recommended) config.
+Provide `div` your resource definitions via either `static` or `dynamic`(recommended) config.
 
 ### Static configuration
 
-In static configuration, you provide one or more resource definitions in `crdb.yaml`:
+In static configuration, you provide one or more resource definitions in `div.yaml`:
 
 ```yaml
 metadata:
@@ -187,18 +256,18 @@ spec:
         kind: Cluster
 ```
 
-Now you can CRUD the `cluster` resources by running `crdb` commands:
+Now you can CRUD the `cluster` resources by running `div` commands:
 
 More concretely:
 
-- `crdb apply -f yourcluster.yaml` to create a `cluster` resource. See `example/foo.cluster.yaml` for details on the yaml file.
-- `crdb [get|delete] cluster foo` to get or delete a `cluster` named `foo`, respectively.
+- `div apply -f yourcluster.yaml` to create a `cluster` resource. See `example/foo.cluster.yaml` for details on the yaml file.
+- `div [get|delete] cluster foo` to get or delete a `cluster` named `foo`, respectively.
 
 ### Dynamic configuration(recommended)
 
-In `dynamic` configuration, you just tell `crdb` to read resource definitions from the specified source.
+In `dynamic` configuration, you just tell `div` to read resource definitions from the specified source.
 
-An example `crdb.yaml` that loads resource definitions from a DynamoDB table named `crdb-dynamic-customresourcedefinitions` would look like:
+An example `div.yaml` that loads resource definitions from a DynamoDB table named `div-dynamic-customresourcedefinitions` would look like:
 
 ```yaml
 metadata:
@@ -210,7 +279,7 @@ spec:
 Next, create your resource definition on DynamoDB:
 
 ```console
-$ crdb apply -f example/cluster.crd.yaml
+$ div apply -f example/cluster.crd.yaml
 ```
 
 Assuming the `cluster.crd.yaml` looked like:
@@ -224,36 +293,36 @@ spec:
     kind: Cluster
 ```
 
-You can CRUD the `cluster` resources by running `crdb` commands:
+You can CRUD the `cluster` resources by running `div` commands:
 
 More concretely:
 
-- `crdb apply -f yourcluster.yaml` to create a `cluster` resource. See `example/foo.cluster.yaml` for details on the yaml file.
-- `crdb [get|delete] cluster foo` to get or delete a `cluster` named `foo`, respectively.
+- `div apply -f yourcluster.yaml` to create a `cluster` resource. See `example/foo.cluster.yaml` for details on the yaml file.
+- `div [get|delete] cluster foo` to get or delete a `cluster` named `foo`, respectively.
 
 ## Roadmap
 
 ### List-Watch
 
-- [x] `crdb get myresource --watch` to stream resource changes, including creations, updates, and deletions.
+- [x] `div get myresource --watch` to stream resource changes, including creations, updates, and deletions.
 
 ### Wait for condition
 
-- [x] `crdb wait myresource foo "status.phase ~= 'Done.*'"` to wait until `myresource` named `foo` matches the [jsonql](https://github.com/elgs/jsonql) expression.
-- [x] `crdb wait myresource foo ... --timeout 10s` adds timeout to the above
+- [x] `div wait myresource foo "status.phase ~= 'Done.*'"` to wait until `myresource` named `foo` matches the [jsonql](https://github.com/elgs/jsonql) expression.
+- [x] `div wait myresource foo ... --timeout 10s` adds timeout to the above
 
 ### Resource Logs
 
-- [x] `crdb logs write myresource foo -f logs.txt` to write logs. logs can be streamed from another clients.
-- [x] `crdb logs read myresource foo -f` to stream logs associated to the resource
+- [x] `div logs write myresource foo -f logs.txt` to write logs. logs can be streamed from another clients.
+- [x] `div logs read myresource foo -f` to stream logs associated to the resource
 
 ### Usability Improvements
 
-- [x] `crdb wait myresource foo --logs "status.phase = 'Done'"` to wait until `myresource` named `foo` matches the [jsonql](https://github.com/elgs/jsonql) expression, while streaming all the logs associated to the resource until the end
-- [ ] `crdb wait --file foo.myresource.yaml --apply --logs --until jsonql="status.phase = 'Done'"` to create `myresource` named `foo` and wait until it comes to match the [jsonql](https://github.com/elgs/jsonql) expression, while streaming all the logs associated to the resource until the end
-- [ ] `crdb gen iampolicy [readonly|writeonly|readwrite] myresource` to generate cloud IAM policy like AWS IAM policy to ease setting up least privilege for your developers
-- [ ] `crdb template -f myresoruce.yaml.tpl --pipe-to "crdb apply -f -"` to consume ndjson input to apply execute the specified command with the input generated from the template
-- [ ] `crdb init --source dynamodb` to generate `crdb.yaml`
+- [x] `div wait myresource foo --logs "status.phase = 'Done'"` to wait until `myresource` named `foo` matches the [jsonql](https://github.com/elgs/jsonql) expression, while streaming all the logs associated to the resource until the end
+- [ ] `div wait --file foo.myresource.yaml --apply --logs --until jsonql="status.phase = 'Done'"` to create `myresource` named `foo` and wait until it comes to match the [jsonql](https://github.com/elgs/jsonql) expression, while streaming all the logs associated to the resource until the end
+- [ ] `div gen iampolicy [readonly|writeonly|readwrite] myresource` to generate cloud IAM policy like AWS IAM policy to ease setting up least privilege for your developers
+- [ ] `div template -f myresoruce.yaml.tpl --pipe-to "div apply -f -"` to consume ndjson input to apply execute the specified command with the input generated from the template
+- [ ] `div init --source dynamodb` to generate `div.yaml`
 
 ## Contributing
 

@@ -8,7 +8,7 @@
   version = "v0.27.0"
 
 [[projects]]
-  branch = "brig-run-as-lib"
+  branch = "script-runner-alt-log-dest"
   name = "github.com/Azure/brigade"
   packages = [
     "pkg/brigade",
@@ -18,7 +18,7 @@
     "pkg/storage/kube",
     "pkg/storage/kube/apicache"
   ]
-  revision = "18ca4675d4354ed4954f4db5c7e6dedbc1c8fcfa"
+  revision = "584fc238e3381a1caa60878e23c35e3c70cfd98b"
   source = "github.com/mumoshu/brigade"
 
 [[projects]]
@@ -75,8 +75,8 @@
     "service/dynamodbstreams",
     "service/sts"
   ]
-  revision = "56018901efd0b8084af1fb83b7e2604aba53f143"
-  version = "v1.15.31"
+  revision = "1186f7e6f000ce13edff71ed5ecc8b0e27ba38d7"
+  version = "v1.15.33"
 
 [[projects]]
   name = "github.com/cenkalti/backoff"
@@ -187,7 +187,7 @@
     "openstack/utils",
     "pagination"
   ]
-  revision = "0e258f4b7cabeaad280d3c24f308347fc6ba51f0"
+  revision = "ab26b4981fb978f41999e13d11351fceea7c586d"
 
 [[projects]]
   name = "github.com/guregu/dynamo"
@@ -332,7 +332,7 @@
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["ssh/terminal"]
-  revision = "0709b304e793a5edb4a2c0145f281ecdc20838a4"
+  revision = "0e37d006457bf46f9e6692014ba72ef82c33022c"
 
 [[projects]]
   branch = "master"
@@ -345,7 +345,7 @@
     "http2/hpack",
     "idna"
   ]
-  revision = "161cd47e91fd58ac17490ef4d742dc98bb4cf60e"
+  revision = "26e67e76b6c3f6ce91f7c52def5af501b4e0f3a2"
 
 [[projects]]
   branch = "master"
@@ -574,6 +574,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c61859e00ed5dd412f0605a5a394bbe8d6e7cf0ea259acaa2643d581b1f31907"
+  inputs-digest = "237a40d6e4a2a89265cd265bcc68852c3adaae64d1d92f7b7a4cf69b28c5751a"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -7,17 +7,17 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodbstreams"
 	"github.com/guregu/dynamo"
-	"github.com/mumoshu/crdb/api"
-	"github.com/mumoshu/crdb/dynamodb/awssession"
-	"github.com/mumoshu/crdb/dynamodb/stream"
-	"github.com/mumoshu/crdb/framework"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/dynamodb/awssession"
+	"github.com/mumoshu/division/dynamodb/stream"
+	"github.com/mumoshu/division/framework"
 	"os"
 	"time"
 )
 
 const HashKeyName = "name_hash_key"
 
-type dbClient interface {
+type Store interface {
 	GetPrint(resource, name string, selectors []string, output string, watch bool) error
 	GetAsync(resource, name string, selectors []string, watch bool) (<-chan *api.Resource, <-chan error)
 	GetSync(resource, name string, selectors []string) ([]*api.Resource, error)
@@ -31,8 +31,8 @@ type dbClient interface {
 type dynamoResourceDB struct {
 	databaseName string
 	db           *dynamo.DB
-	config *api.Config
-	logs         *cwlogs
+	config       *api.Config
+	logs         *LogStore
 	session      *session.Session
 	namespace    string
 	resourceDefs []api.CustomResourceDefinition
@@ -113,7 +113,7 @@ func (p *dynamoResourceDB) streamForResourceNamed(resourceName string) (<-chan *
 	return p.streamForTable(p.tableNameForResourceNamed(resourceName))
 }
 
-func NewDB(configFile string, namespace string) (dbClient, error) {
+func NewDB(configFile string, namespace string) (Store, error) {
 	config, err := framework.LoadConfigFromYamlFile(configFile)
 	if err != nil {
 		return nil, err
@@ -132,7 +132,7 @@ func NewDB(configFile string, namespace string) (dbClient, error) {
 	return &dynamoResourceDB{
 		databaseName: config.Metadata.Name,
 		db:           db,
-		config: config,
+		config:       config,
 		logs:         logs,
 		session:      sess,
 		namespace:    namespace,

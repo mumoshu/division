@@ -15,27 +15,31 @@
 package cmd
 
 import (
-	"github.com/mumoshu/crdb/dynamodb"
-	"github.com/spf13/cobra"
 	"fmt"
-	"github.com/mumoshu/crdb/api"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/dynamodb"
+	"github.com/spf13/cobra"
 	"os"
-	"strings"
 	"reflect"
+	"strings"
 	"time"
 )
 
 type DeployOptions struct {
 	Project string
-	Ref string
-	App string
-	Watch     bool
+	Ref     string
+	App     string
+	Watch   bool
 }
 
 var deployOpts DeployOptions
 
 func init() {
 	deployOpts = DeployOptions{}
+}
+
+type installResult struct {
+	err error
 }
 
 func NewCmdDeploy() *cobra.Command {
@@ -76,7 +80,7 @@ func NewCmdDeploy() *cobra.Command {
 			i := 0
 			for _, p := range targetedProjects {
 				targetedProjectNames[i] = fmt.Sprintf("  * %s", p.NameHashKey)
-				i ++
+				i++
 			}
 			fmt.Fprintf(os.Stderr, `%d projects found:
 
@@ -106,7 +110,7 @@ func NewCmdDeploy() *cobra.Command {
 				i := 0
 				for _, app := range targetedApps {
 					targetedAppNames[i] = fmt.Sprintf("  * %s", app.NameHashKey)
-					i ++
+					i++
 				}
 				fmt.Fprintf(os.Stderr, `%d applications found:
 
@@ -130,7 +134,7 @@ func NewCmdDeploy() *cobra.Command {
 				case *dynamodb.ErrResourceNotFound:
 					newDeploy := &api.Resource{
 						NameHashKey: deployName,
-						Kind: "Deployment",
+						Kind:        "Deployment",
 						Metadata: api.Metadata{
 							Name: deployName,
 						},
@@ -178,7 +182,8 @@ func NewCmdDeploy() *cobra.Command {
 					clusterName := cluster.NameHashKey
 
 					// TODO record start time
-					L: for {
+				L:
+					for {
 						// TODO timeout
 						deployId := appName
 						deploys, err := db.GetSync("deployment", deployId, []string{})
@@ -207,35 +212,41 @@ func NewCmdDeploy() *cobra.Command {
 							install := installs[0]
 							installName := install.NameHashKey
 
-							completion := make(chan bool)
+							installResults := make(chan *installResult)
 
 							go func() {
 								for {
+									time.Sleep(5 * time.Second)
 									is, err := db.GetSync("install", installName, []string{})
 									if err != nil {
 										fmt.Fprintf(os.Stderr, "error while polling install status. ignoring: %v\n", err)
 									}
 									if is != nil {
 										ins := is[0]
-										status := ins.Spec["status"]
-										fmt.Fprintf(os.Stderr, "%s: status=%s\n", installName, status)
-										if status == "completed" {
-											completion <- true
+										installPhase := ins.Spec["phase"]
+										fmt.Fprintf(os.Stderr, "install %s: phase=%s\n", installName, installPhase)
+										if installPhase == "completed" {
+											installResults <- &installResult{}
+											return
+										} else if installPhase == "failed" {
+											installResults <- &installResult{err: fmt.Errorf("install %s has failed", installName)}
 											return
 										}
 									}
-									time.Sleep(10 * time.Second)
 								}
 							}()
 
 							logMsgs, logErrs := logs.Read("install", installName, 0, true)
 
-							for logMsgs != nil || logErrs != nil {
+							for logMsgs != nil || logErrs != nil || installResults != nil {
 								select {
-								case _, ok := <-completion:
+								case r, ok := <-installResults:
 									if ok {
 										logMsgs = nil
 										logErrs = nil
+										if r.err != nil {
+											return err
+										}
 										break L
 									}
 								case msg, ok := <-logMsgs:

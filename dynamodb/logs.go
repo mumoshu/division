@@ -4,34 +4,35 @@
 package dynamodb
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
-	"github.com/mumoshu/crdb/api"
-	"github.com/mumoshu/crdb/dynamodb/awssession"
-	"github.com/mumoshu/crdb/framework"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/dynamodb/awssession"
+	"github.com/mumoshu/division/framework"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"sync"
 	"time"
-	"errors"
 )
 
 const SecondInMillis = 1000
 const MinuteInMillis = 60 * SecondInMillis
 
-type cwlogs struct {
+type LogStore struct {
 	client    *cloudwatchlogs.CloudWatchLogs
 	config    *api.Config
 	namespace string
 }
 
-func NewLogs(configFile string, namespace string) (*cwlogs, error) {
+func NewLogs(configFile string, namespace string) (*LogStore, error) {
 	sess, err := awssession.New(os.Getenv("AWSDEBUG") != "")
 	if err != nil {
 		return nil, err
@@ -43,8 +44,8 @@ func NewLogs(configFile string, namespace string) (*cwlogs, error) {
 	return newLogs(config, namespace, sess)
 }
 
-func newLogs(config *api.Config, namespace string, sess *session.Session) (*cwlogs, error) {
-	return &cwlogs{
+func newLogs(config *api.Config, namespace string, sess *session.Session) (*LogStore, error) {
+	return &LogStore{
 		client:    cloudwatchlogs.New(sess),
 		config:    config,
 		namespace: namespace,
@@ -122,7 +123,7 @@ func (e *ErrLogsNotFound) Error() string {
 	return e.msg
 }
 
-func (c *cwlogs) Read(resource, name string, since time.Duration, follow bool) (<-chan string, <-chan error) {
+func (c *LogStore) Read(resource, name string, since time.Duration, follow bool) (<-chan string, <-chan error) {
 	msgs := make(chan string)
 	errs := make(chan error)
 
@@ -171,8 +172,7 @@ func (c *cwlogs) Read(resource, name string, since time.Duration, follow bool) (
 	return msgs, errs
 }
 
-
-func (c *cwlogs) ReadPrint(resource, name string, since time.Duration, follow bool) error {
+func (c *LogStore) ReadPrint(resource, name string, since time.Duration, follow bool) error {
 	logsCh, errCh := c.read(resource, name, since, follow)
 	interrupts := make(chan os.Signal, 1)
 	defer close(interrupts)
@@ -211,7 +211,7 @@ func (c *cwlogs) ReadPrint(resource, name string, since time.Duration, follow bo
 	return err
 }
 
-func (c *cwlogs) read(resource, name string, since time.Duration, follow bool) (<-chan *cloudwatchlogs.FilteredLogEvent, <-chan error) {
+func (c *LogStore) read(resource, name string, since time.Duration, follow bool) (<-chan *cloudwatchlogs.FilteredLogEvent, <-chan error) {
 	logGroup := fmt.Sprintf("%s%s-%s-%s", databasePrefix, c.config.Metadata.Name, c.namespace, resource)
 	var startTime *time.Time
 	if since.Nanoseconds() == 0 {
@@ -223,20 +223,112 @@ func (c *cwlogs) read(resource, name string, since time.Duration, follow bool) (
 	return c.readLogEvents(logGroup, name, follow, startTime)
 }
 
-func (c *cwlogs) Writer(resource, name string) (io.Writer, error) {
-	r, w := io.Pipe()
+func (c *LogStore) Writer(resource, name string) (io.WriteCloser, error) {
+	logStream := name
+	logGroup := fmt.Sprintf("%s%s-%s-%s", databasePrefix, c.config.Metadata.Name, c.namespace, resource)
+	var seqToken *string
 
-	buf := new(bytes.Buffer)
+	{
+		out, err := c.client.DescribeLogGroups(&cloudwatchlogs.DescribeLogGroupsInput{
+			LogGroupNamePrefix: aws.String(logGroup),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(out.LogGroups) == 0 {
+			_, err := c.client.CreateLogGroup(&cloudwatchlogs.CreateLogGroupInput{
+				LogGroupName: aws.String(logGroup),
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+		describeStreamOut, err := c.client.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
+			LogGroupName:        aws.String(logGroup),
+			LogStreamNamePrefix: aws.String(logStream),
+		})
+		outLogStreams := describeStreamOut.LogStreams
+		if len(outLogStreams) == 0 {
+			if _, err := c.client.CreateLogStream(&cloudwatchlogs.CreateLogStreamInput{
+				LogGroupName:  aws.String(logGroup),
+				LogStreamName: aws.String(logStream),
+			}); err != nil {
+				return nil, err
+			}
+
+			describeStreamOut, err = c.client.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
+				LogGroupName:        aws.String(logGroup),
+				LogStreamNamePrefix: aws.String(logStream),
+			})
+			outLogStreams = describeStreamOut.LogStreams
+		}
+
+		firstLogStream := outLogStreams[0]
+		seqToken = firstLogStream.UploadSequenceToken
+	}
+
+	r, w := io.Pipe()
+	br := bufio.NewReader(r)
 	go func() {
-		buf.ReadFrom(r)
-		fmt.Fprint(w, "some text to be read\n")
-		w.Close()
+		defer w.Close()
+		for {
+			lineToBeWritten := new(bytes.Buffer)
+
+			for {
+				readBytes, isPrefix, err := br.ReadLine()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					panic(err)
+				}
+				n, err := lineToBeWritten.Write(readBytes)
+				if n != len(readBytes) {
+					panic(err)
+				}
+				if !isPrefix {
+					break
+				}
+			}
+
+			{
+				n, err := lineToBeWritten.Write([]byte("\n"))
+				if n != 1 {
+					panic(err)
+				}
+			}
+
+			{
+				msg := lineToBeWritten.String()
+
+				logEvents := []*cloudwatchlogs.InputLogEvent{
+					{
+						Message:   aws.String(msg),
+						Timestamp: aws.Int64(time.Now().Unix() * 1000),
+					},
+				}
+				putInput := &cloudwatchlogs.PutLogEventsInput{
+					LogGroupName:  aws.String(logGroup),
+					LogStreamName: aws.String(logStream),
+					LogEvents:     logEvents,
+				}
+				if seqToken != nil {
+					putInput.SequenceToken = seqToken
+				}
+				putOut, putErr := c.client.PutLogEvents(putInput)
+				if putErr != nil {
+					panic(putErr)
+				}
+
+				seqToken = putOut.NextSequenceToken
+			}
+		}
 	}()
 
 	return w, nil
 }
 
-func (c *cwlogs) WriteFile(resource, name string, file string) error {
+func (c *LogStore) WriteFile(resource, name string, file string) error {
 	var rawInput []byte
 	if file == "-" {
 		var buf bytes.Buffer
@@ -254,66 +346,19 @@ func (c *cwlogs) WriteFile(resource, name string, file string) error {
 		}
 		rawInput = raw
 	}
-	logStream := name
-	logGroup := fmt.Sprintf("%s%s-%s-%s", databasePrefix, c.config.Metadata.Name, c.namespace, resource)
-	out, err := c.client.DescribeLogGroups(&cloudwatchlogs.DescribeLogGroupsInput{
-		LogGroupNamePrefix: aws.String(logGroup),
-	})
+	w, err := c.Writer(resource, name)
 	if err != nil {
 		return err
 	}
-	if len(out.LogGroups) == 0 {
-		_, err := c.client.CreateLogGroup(&cloudwatchlogs.CreateLogGroupInput{
-			LogGroupName: aws.String(logGroup),
-		})
-		if err != nil {
-			return err
-		}
-	}
-	describeStreamOut, err := c.client.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
-		LogGroupName:        aws.String(logGroup),
-		LogStreamNamePrefix: aws.String(logStream),
-	})
-	outLogStreams := describeStreamOut.LogStreams
-	if len(outLogStreams) == 0 {
-		if _, err := c.client.CreateLogStream(&cloudwatchlogs.CreateLogStreamInput{
-			LogGroupName:  aws.String(logGroup),
-			LogStreamName: aws.String(logStream),
-		}); err != nil {
-			return err
-		}
-
-		describeStreamOut, err = c.client.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
-			LogGroupName:        aws.String(logGroup),
-			LogStreamNamePrefix: aws.String(logStream),
-		})
-		outLogStreams = describeStreamOut.LogStreams
-	}
-
-	logEvents := []*cloudwatchlogs.InputLogEvent{
-		{
-			Message:   aws.String(string(rawInput)),
-			Timestamp: aws.Int64(time.Now().Unix() * 1000),
-		},
-	}
-	putInput := &cloudwatchlogs.PutLogEventsInput{
-		LogGroupName:  aws.String(logGroup),
-		LogStreamName: aws.String(logStream),
-		LogEvents:     logEvents,
-	}
-	firstLogStream := outLogStreams[0]
-	seqToken := firstLogStream.UploadSequenceToken
-	if seqToken != nil {
-		putInput.SequenceToken = seqToken
-	}
-	_, putErr := c.client.PutLogEvents(putInput)
-	if putErr != nil {
-		return putErr
+	w.Write(rawInput)
+	w.Write([]byte("\n"))
+	if err := w.Close(); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (c *cwlogs) Delete(resource, name string) error {
+func (c *LogStore) Delete(resource, name string) error {
 	logGroup := fmt.Sprintf("%s%s-%s-%s", databasePrefix, c.config.Metadata.Name, c.namespace, resource)
 	_, err := c.client.DeleteLogGroup(&cloudwatchlogs.DeleteLogGroupInput{
 		LogGroupName: aws.String(logGroup),
@@ -327,7 +372,7 @@ func (c *cwlogs) Delete(resource, name string) error {
 //Unless the follow flag is true the channel is closed once there are no more events available
 //
 // The design is that a log group is created per custom resource definition, and a log stream is created custom resource.
-func (c cwlogs) readLogEvents(logGroupName string, logStreamNamePrefix string, follow bool, startTime *time.Time) (<-chan *cloudwatchlogs.FilteredLogEvent, <-chan error) {
+func (c LogStore) readLogEvents(logGroupName string, logStreamNamePrefix string, follow bool, startTime *time.Time) (<-chan *cloudwatchlogs.FilteredLogEvent, <-chan error) {
 	cwl := c.client
 
 	var lastSeenTimestamp *int64
@@ -370,7 +415,7 @@ func (c cwlogs) readLogEvents(logGroupName string, logStreamNamePrefix string, f
 			}
 		}
 		if len(streamNames) == 0 {
-			return nil, fmt.Errorf("no such log stream(s).")
+			return nil, &ErrLogsNotFound{"no such log stream(s)."}
 		}
 		if len(streamNames) >= 100 { //FilterLogEventPages won't take more than 100 stream names
 			streamNames = streamNames[0:100]
@@ -471,7 +516,7 @@ func logStreamMatchesTimeRange(logStream *cloudwatchlogs.LogStream, startTimeMil
 
 // listLogStreams lists the streams of a given stream group
 // It returns a channel where the stream names are published
-func (c cwlogs) listLogStreams(groupName string, streamNamePrefix string, startTimeMillis *int64) (<-chan *string, <-chan error) {
+func (c LogStore) listLogStreams(groupName string, streamNamePrefix string, startTimeMillis *int64) (<-chan *string, <-chan error) {
 	cwl := c.client
 	streamNamesCh := make(chan *string)
 	errCh := make(chan error)

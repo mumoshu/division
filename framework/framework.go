@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ghodss/yaml"
-	"github.com/mumoshu/crdb/api"
+	"github.com/mumoshu/division/api"
 	"io"
 	"io/ioutil"
 	"os"

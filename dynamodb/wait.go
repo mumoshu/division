@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/elgs/jsonql"
-	"github.com/mumoshu/crdb/api"
-	"github.com/mumoshu/crdb/framework"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/framework"
 	"os"
 	"time"
 )
@@ -70,7 +70,7 @@ func (p *dynamoResourceDB) wait(resource, name string, query string, timeout tim
 		}
 	}
 
-	return nil, fmt.Errorf("stream stopped unexpectedly: please rerun the crdb command")
+	return nil, fmt.Errorf("stream stopped unexpectedly: please rerun the div command")
 }
 
 func match(resource api.Resource, query string) (bool, error) {

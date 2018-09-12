@@ -5,8 +5,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/guregu/dynamo"
-	"github.com/mumoshu/crdb/api"
-	"github.com/mumoshu/crdb/framework"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/framework"
 	"os"
 	"time"
 )

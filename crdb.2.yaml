@@ -1,17 +1,17 @@
 metadata:
   name: test2
 spec:
-  # Additional resource definitions are loaded from dynamodb table named `crdb-test1`
+  # Additional resource definitions are loaded from dynamodb table named `div-test1`
   source: "dynamodb://"
-  # You can define resource definitions inline i.e. within `crdb.yaml`
+  # You can define resource definitions inline i.e. within `div.yaml`
   #
   # Run:
   #
-  #   crdb -c crdb.2.yaml apply -f example/cluster.crd.yaml
-  #   crdb -c crdb.2.yaml apply -f example/deployment.crd.yaml
-  #   crdb -c crdb.2.yaml apply -f example/application.crd.yaml
+  #   div -c div.2.yaml apply -f example/cluster.crd.yaml
+  #   div -c div.2.yaml apply -f example/deployment.crd.yaml
+  #   div -c div.2.yaml apply -f example/application.crd.yaml
   #
-  # And crdb will locate the following resource definitions from the dynamodb table for you:
+  # And div will locate the following resource definitions from the dynamodb table for you:
   #
   # customResourceDefinitions:
   #  - kind: CustomResourceDefinition

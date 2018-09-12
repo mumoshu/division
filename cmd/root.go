@@ -40,7 +40,7 @@ var globalOpts GlobalOptions
 // RootCmd represents the base command when called without any subcommands
 func NewCmdRoot() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "crdb",
+		Use:   "div",
 		Short: "custom resources database",
 		Long:  `access custom resources stored in various datastores via simple cli`,
 	}
@@ -54,7 +54,7 @@ func NewCmdRoot() *cobra.Command {
 
 	flags := cmd.PersistentFlags()
 	flags.StringVarP(&globalOpts.Namespace, "namespace", "n", "default", "Namespace to restrict fetched resources")
-	flags.StringVarP(&globalOpts.Config, "config", "c", "crdb.yaml", "Config file containing custom resource definitions")
+	flags.StringVarP(&globalOpts.Config, "config", "c", "div.yaml", "Config file containing custom resource definitions")
 	flags.StringVarP(&globalOpts.Output, "output", "o", "json", "Output format. One of: text|json|yaml")
 
 	cmd.AddCommand(NewCmdGet())
@@ -84,7 +84,7 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	} else {
 		// Search config in home directory with name ".gody" (without extension).
-		viper.SetConfigName(".crdb")
+		viper.SetConfigName(".div")
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match

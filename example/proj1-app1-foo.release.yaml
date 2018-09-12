@@ -1,4 +1,4 @@
-kind: Install
+kind: Release
 metadata:
   name: proj1-app1-foo
   namespace: default

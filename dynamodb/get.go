@@ -8,8 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodbstreams"
 	"github.com/guregu/dynamo"
-	"github.com/mumoshu/crdb/api"
-	"github.com/mumoshu/crdb/framework"
+	"github.com/mumoshu/division/api"
+	"github.com/mumoshu/division/framework"
 	"os"
 	"os/signal"
 	"time"
@@ -85,18 +85,20 @@ func (p *dynamoResourceDB) get(resource, name string, selectors []string) (api.R
 		var msg string
 		if name != "" {
 			msg = fmt.Sprintf(`%s "%s" not found: dynamodb table named "%s" exists, but no item named "%s" found`, resource, name, p.tableNameForResourceNamed(resource), name)
+			return nil, &ErrResourceNotFound{msg}
 		} else {
 			msg = fmt.Sprintf(`no %s found: dynamodb table named "%s" exists, but no item named "%s" found`, resource, p.tableNameForResourceNamed(resource), name)
+			fmt.Fprintf(os.Stderr, msg)
 		}
-		return nil, &ErrResourceNotFound{msg}
 	} else if aerr, ok := err.(awserr.Error); ok && aerr.Code() == dynamodb.ErrCodeResourceNotFoundException {
 		var msg string
 		if name != "" {
-			msg = fmt.Sprintf(`%s "%s" not found: no dynamodb table named "%s" exists. create it by "crdb apply -f your-new-%s.%s.yaml"`, resource, name, p.tableNameForResourceNamed(resource), resource, resource)
+			msg = fmt.Sprintf(`%s "%s" not found: no dynamodb table named "%s" exists. create it by "div apply -f your-new-%s.%s.yaml"`, resource, name, p.tableNameForResourceNamed(resource), resource, resource)
+			return nil, &ErrResourceNotFound{msg}
 		} else {
-			msg = fmt.Sprintf(`no %s found: no dynamodb table named "%s" exists. create it by "crdb apply -f your-new-%s.%s.yaml"`, resource, p.tableNameForResourceNamed(resource), resource, resource)
+			msg = fmt.Sprintf(`no %s found: no dynamodb table named "%s" exists. create it by "div apply -f your-new-%s.%s.yaml"`, resource, p.tableNameForResourceNamed(resource), resource, resource)
+			fmt.Fprintf(os.Stderr, msg)
 		}
-		return nil, &ErrResourceNotFound{msg}
 	}
 	return resources, nil
 }
