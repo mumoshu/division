@@ -3,6 +3,8 @@ Division
 
 A single-binary control-plane for your Kubernetes clusters
 
+Composed of several brigades, division delegates common tasks seen while operating distributed microservices on Kubenretes.
+
 ## Introduction
 
 `Division` is a kind of control-plane for an event-based scripting platform for Kubernetes [Brigade](https://github.com/Azure/brigade).
