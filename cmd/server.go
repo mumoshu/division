@@ -106,6 +106,9 @@ func NewCmdGateway() *cobra.Command {
 				if deployOpts.App != "" && appName != deployOpts.App {
 					continue
 				}
+				if app.Spec["project"] == nil {
+					panic(fmt.Sprintf("application \"%s\" has no \"project\" field", appName))
+				}
 				appProject := app.Spec["project"].(string)
 				if _, ok := targetedProjects[appProject]; !ok {
 					continue
@@ -130,6 +133,12 @@ func NewCmdGateway() *cobra.Command {
 			for {
 				select {
 				case d := <-deploys:
+					if d.Spec["project"] == nil {
+						panic(fmt.Sprintf("deployment \"%s\" has no \"project\" field", d.NameHashKey))
+					}
+					if d.Spec["app"] == nil {
+						panic(fmt.Sprintf("deployment \"%s\" has no \"app\" field", d.NameHashKey))
+					}
 					deployProj := d.Spec["project"].(string)
 					deployApp := d.Spec["app"].(string)
 					_, hasTargetedProj := targetedProjects[deployProj]
@@ -311,14 +320,16 @@ func (g *gateway) handleInstall(i *api.Resource) error {
 			s := []byte(`
 const { events, Job } = require("brigadier")
 
-events.on("exec", (e, p) => {
+events.on("div:install", (e, p) => {
   console.log({"event": e, "payload": p})
+
+  var ep = JSON.parse(e.payload)
 
   var job = new Job("helmfile-apply", "alpine:3.4")
   job.tasks = [
     "echo Hello",
     "echo World",
-    p.command.join(",")
+    ep.command.join(" ")
   ]
 
   job.run()
@@ -344,7 +355,7 @@ events.on("exec", (e, p) => {
 			}
 
 			var postPhase string
-			err = r.SendScript("mumoshu/uuid-generator", s, "exec", "", sha1, payload, "")
+			err = r.SendScript(insProj, s, "div:install", "", sha1, payload, "")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "brigade failed: %v\n", err)
 				postPhase = "failed"

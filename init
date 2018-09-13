@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+dir=$(cd $(dirname $0); pwd)
+
+github_user_repo=${1:-mumoshu/uuid-generator}
+application_name=app1
+
+project_id=$(echo $github_user_repo | sed -e 's/\//-/g')
+brigade_repository=github.com/${github_user_repo}
+brigade_clone_url="https://${brigade_repository}.git"
+helm_release_name=brigade-project-${project_id}
+helm_opts=""
+
+helm repo add brigade https://azure.github.io/brigade || true
+
+if [ "${GITHUB_TOKEN}" != "" ]; then
+  helm upgrade --install "$helm_release_name" brigade/brigade-project -f "${dir}/example/brigade/uuid-generator.yaml" \
+    --set project="${github_user_repo}",github.token="$GITHUB_TOKEN",cloneURL="${brigade_clone_url}" $helm_opts \
+    --force
+else
+  helm upgrade --install "$helm_release_name" brigade/brigade-project -f "${dir}/example/brigade/uuid-generator.yaml" \
+    --set project="${github_user_repo}",vcsSidecar=NONE,cloneURL="https://${github_user_repo}.git" $helm_opts \
+    --force
+fi
+
+helm list | grep $project_id
+
+brig project list | grep $github_user_repo
+
+application_id=${project_id}-${application_name}
+
+app_file="${application_id}.application.yaml"
+prj_file="${project_id}.project.yaml"
+
+cat <<EOF | tee ${app_file}
+kind: Application
+metadata:
+  name: ${application_id}
+  namespace: default
+spec:
+  project: ${project_id}
+  repo: ${github_user_repo}
+EOF
+
+div apply -f ${app_file}
+
+cat <<EOF | tee ${prj_file}
+kind: Project
+metadata:
+  name: ${project_id}
+  namespace: default
+spec:
+  repo: ${github_user_repo}
+EOF
+
+div apply -f ${prj_file}
+
+# deploy all apps in the project
+div deploy --project "${github_user_repo}" --ref a6b396b6dcc25d24f86a8685e6d28b431e7bed9c
+
+# long-running apps
+# div deploy --project "${repo}" --app web-server --ref a6b396b6dcc25d24f86a8685e6d28b431e7bed9c
+
+# oneshot jobs
+# div job run --project "${repo}" --name dev-console [--ref a6b396b6dcc25d24f86a8685e6d28b431e7bed9c | --image mumoshu/devsoncole:$TAG | --chart-ver ]
+# div job run --project "${repo}" --name dev-console [--ref a6b396b6dcc25d24f86a8685e6d28b431e7bed9c | --image mumoshu/devsoncole:$TAG | --chart-ver ]
+# div job list --project "${repo}"

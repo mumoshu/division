@@ -3,4 +3,6 @@ metadata:
   name: foo
   namespace: default
 spec:
+  project: mumoshu/uuid-generator
+  app: foo
   sha1: q23rerfgdafg
