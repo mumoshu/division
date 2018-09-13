@@ -11,8 +11,8 @@ Composed of several brigades, division delegates common tasks seen while operati
 
 It is capable of distributing, scheduling, and logging any Kubernetes pods, runnable as Brigade scripts, across multiple Kubernetes clusters.
 
-Use it from your local machine or continuous integration system for
-GitOps, continous delivery, blue-green Kubernetes cluster switch, disaster recovery, and so on.
+Run it from your local machine or continuous integration system, as part of
+your GitOps or continous delivery pipeline, blue-green Kubernetes cluster switch, disaster recovery, and so on.
 
 ## Model use-case: DIY GitOps Pipeline
 
@@ -21,17 +21,16 @@ For demonstration purpose, here's how you'd implement a GitOps pipeline for your
 Firstly, install division's brigade gateway into your Kubernetes cluster:
 
 ```
-$ helmfile -f brigade-div-gateway.yaml \
-  --set cluster=mycluster1 apply
+$ ./init mumoshu/uuid-generator app1
 ```
 
-Or run the gateway locally:
+And run the gateway locally, or remotely via the helm chart:
 
 ```
 $ div gateway --cluster mycluster1
 ```
 
-Then, update your CircleCI pipeline to run:
+Then, run the `div deploy` command to deploy your project onto the specified Kubernetes cluster:
 
 ```
 $ div deploy \
@@ -43,7 +42,11 @@ $ div deploy \
 
 As soon as `div deloy` is run, the actual deployment using [helmfile](https://github.com/roboll/helmfile) is executed,
 and its logs are streamed from the gateway into `div deploy`.
+
 What's important is that this happens without direct access to Kubernets API.
+
+So even you are an user of publicly hosted CI/CD service like CircleCI or Travis CI, you can use `div` to deploy your Kubernetes applications,
+without exposing the Kubernetes API server to Internet.
 
 Repeat the `div gateway` for each cluster and omit `--cluster` flags from `div deploy`
 to make it multi-cluster aware.
