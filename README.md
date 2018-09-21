@@ -124,79 +124,81 @@ $ go get github.com/mumoshu/div
 
 ## Getting started
 
-1. Provide a proper AWS credentials to `div` via envvars(`AWS_PROFILE` is supported, too) or an instance profile.
+1. Create an IAM user for `division` whose policy contains:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllAPIActionsOnUserSpecificTable",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:*"
+            ],
+            "Resource": "arn:aws:dynamodb:YOUR_REGION:YOUR_AWS_ACCOUNT:table/crdb*"
+        },
+        {
+            "Sid": "AdditionalPrivileges",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:ListTables",
+                "dynamodb:DescribeTable",
+                "cloudwatch:*"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
 
 2. Create `div.yaml`:
 
 ```yaml
 metadata:
-  name: static
+  name: dynamic
 spec:
-  - kind: CustomResourceDefinition
-    metadata:
-      name: cluster
-    spec:
-      names:
-        kind: Cluster
+  source: "dynamodb://"
 ```
 
 Now, you are ready to CRUD your resources by running `div`.
 
+3. Provide a proper AWS credentials to `div` via envvars(`AWS_PROFILE` is supported, too) or an instance profile.
+
+4. Create resource definitions for resources used by `division`.
+ 
+This results in creating a few DynamoDB tables, and adding corresponding table items to them.
+ 
+To do so, run `div apply -f FILE` command for each resource defitinion:
+
+```console
+for resource in application cluster deployment install release project; do
+  div apply -f ${resource}.crd.yaml
+done
 ```
-$ div get cluster
-Error: no cluster found: dynamodb table named "div-static-default-cluster" does not exist
 
-$ div apply -f example/foo.cluster.yaml
-cluster "foo" created
+5. Install `brigade` and `div gateway` into your Kubernets cluster by  running:
 
-$ ./div get cluster
-{
-  "items": [
-    {
-      "kind": "Cluster",
-      "metadata": {
-        "name": "foo",
-        "namespace": "default",
-        "creationTimestamp": "2018-08-01T17:03:11.591439013+09:00",
-        "updateTimestamp": "2018-08-01T17:03:11.591442026+09:00"
-      },
-      "spec": {
-        "kubeconfig": "mykubeconfigcontent\n"
-      }
-    }
-  ],
-  "kind": "list"
-}
+```
+$ helm repo add brigade https://azure.github.io/brigade
+$ helm install brigade/brigade --set rbac.enabled=true
 
-$ div apply -f example/foo.cluster.2.yaml
-cluster "foo" updated
+$ git clone https://github.com/mumoshu/division.git
+$ cd division
+$ git checkout $(git tag -l | tail -n 1)
+$ helm install ./charts/division --set rbac.enabled=true
+```
 
-{
-  "items": [
-    {
-      "kind": "Cluster",
-      "metadata": {
-        "name": "foo",
-        "namespace": "default",
-        "creationTimestamp": "2018-08-01T17:03:11.591439013+09:00",
-        "updateTimestamp": "2018-08-01T17:03:58.741607915+09:00"
-      },
-      "spec": {
-        "kubeconfig": "mykubeconfigcontent-updated\n"
-      }
-    }
-  ],
-  "kind": "list"
-}
+6. Deploy the example application onto your cluster via `division`:
 
-$ div delete cluster foo
-cluster "foo" deleted
+```
+$ ./init mumoshu/uuid-generator app1
 
-$ div delete cluster foo
-Error: cluster "foo" not found
-
-$ div get cluster foo
-Error: cluster "foo" not found: dynamodb table named "div-test1-default-cluster" exists, but no item named "foo" found
+$ div deploy \
+  --project mumoshu/microservices \
+  --app mumoshu/microservices/myapp1 \
+  --ref $COMMIT_ID
+  --cluster mycluster1
 ```
 
 ## Usage
